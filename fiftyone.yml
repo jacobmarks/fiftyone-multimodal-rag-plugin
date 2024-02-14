@@ -1,0 +1,12 @@
+fiftyone:
+  version: ">=0.23.5"
+name: "@jacobmarks/multimodal_rag"
+version: "0.0.1"
+description: "Multimodal Retrieval Augmented Generation with LlamaIndex"
+url: "https://github.com/jacobmarks/fiftyone-multimodal-rag-plugin"
+operators:
+  - create_dataset_from_llama_documents
+  - add_llama_documents_to_dataset
+  - create_multimodal_rag_index
+  - query_multimodal_rag_index
+  - get_multimodal_rag_index_info
