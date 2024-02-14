@@ -5,16 +5,12 @@
 from bson import json_util
 from hashlib import sha256
 import os
-from pathlib import Path  ## use to add pdfs
 import random
-import sys
 import textwrap
 
 import json
 from pdf2image import convert_from_path
 from PIL import Image, ImageDraw, ImageFont
-
-# import qdrant_client
 
 from llama_index.core import SimpleDirectoryReader
 from llama_index.core.schema import (
@@ -39,14 +35,18 @@ from llama_index.multi_modal_llms.replicate.base import (
 from llama_index.vector_stores.milvus import MilvusVectorStore
 
 import fiftyone as fo
-import fiftyone.core.utils as fou
 from fiftyone.core.utils import add_sys_path
 import fiftyone.operators as foo
 import fiftyone.operators.types as types
 import fiftyone.types as fot
 import fiftyone.plugins as fop
 
+URI = os.environ.get("ZILLIZ_URI", "http://localhost:19530")
+TOKEN = os.environ.get("ZILLIZ_TOKEN", "")
+
 DEFAULT_MAX_NEW_TOKENS = 300
+ADA002_EMBED_DIM = 1536
+CLIP_EMBED_DIM = 512
 
 OPENAI_MODEL_NAMES = ["gpt-4-vision-preview"]
 REPLICATE_MODEL_NAMES = list(REPLICATE_MULTI_MODAL_LLM_MODELS.keys())
@@ -58,8 +58,6 @@ ALL_MODEL_NAMES.extend(OPENAI_MODEL_NAMES)
 ALL_MODEL_NAMES.extend(REPLICATE_MODEL_NAMES)
 ALL_MODEL_NAMES = sorted(ALL_MODEL_NAMES)
 
-URI = os.environ.get("ZILLIZ_URI", "")
-TOKEN = os.environ.get("ZILLIZ_TOKEN", "")
 
 # define our QA prompt template
 qa_tmpl_str = (
@@ -100,8 +98,6 @@ def _llama_doc_from_fo_sample(sample, text_field=None):
     llama_doc_dict = {}
 
     sample_dict = sample.to_dict()
-    with open("/tmp/out.txt", "w") as f:
-        f.write(str(sample_dict))
 
     for k, v in sample_dict.items():
         if k.startswith("llama__"):
@@ -445,25 +441,19 @@ def _indexing_options_input(ctx, inputs):
         )
 
 
-# def _get_db_path(hash):
-#     path = os.path.expanduser(f"~/.fiftyone/llama_index/qdrant_db/{hash}")
-#     if not os.path.exists(path):
-#         os.makedirs(path)
-#     return path
-
-
 def _create_index(ctx):
     index_hash = _create_hash()
 
-    # client = qdrant_client.QdrantClient(location=":memory:")
     index_name = ctx.params.get("index_name", None)
     dataset = ctx.dataset
 
     is_image_to_text = not ctx.params.get("embed_images", True)
     if is_image_to_text:
         captions_field = ctx.params.get("caption_field", None)
+        image_embed_dim = ADA002_EMBED_DIM
     else:
         captions_field = None
+        image_embed_dim = CLIP_EMBED_DIM
 
     ### Gather documents
     text_documents = [
@@ -481,11 +471,17 @@ def _create_index(ctx):
     ### Create storage context
     text_collection_name = f"text_collection_{index_hash}"
     text_store = MilvusVectorStore(
-        collection_name=text_collection_name, uri=URI, token=TOKEN, dim=1536
+        collection_name=text_collection_name,
+        uri=URI,
+        token=TOKEN,
+        dim=ADA002_EMBED_DIM,
     )
     image_collection_name = f"image_collection_{index_hash}"
     image_store = MilvusVectorStore(
-        collection_name=image_collection_name, uri=URI, token=TOKEN, dim=512
+        collection_name=image_collection_name,
+        uri=URI,
+        token=TOKEN,
+        dim=image_embed_dim,
     )
     storage_context = StorageContext.from_defaults(
         vector_store=text_store, image_store=image_store
@@ -512,13 +508,6 @@ def _create_index(ctx):
     config.nodes = [node for node in nodes]
     config.text_collection_name = text_collection_name
     config.image_collection_name = image_collection_name
-    # config.storage_context_for_text = index.storage_context.vector_stores[
-    #     "default"
-    # ].to_dict()
-    # config.storage_context_for_images = index.storage_context.vector_stores[
-    #     "image"
-    # ].to_dict()
-    # config.service_context = index.service_context.to_dict()
     config.is_image_to_text = is_image_to_text
     config.captions_field = captions_field
     dataset.register_run(run_key, config)
@@ -750,19 +739,23 @@ def _load_index(dataset, run_key):
             nodes.append(TextNode.from_dict(node))
 
     is_image_to_text = config.is_image_to_text
+    if is_image_to_text:
+        image_embed_dim = ADA002_EMBED_DIM
+    else:
+        image_embed_dim = CLIP_EMBED_DIM
 
     text_storage_context = MilvusVectorStore(
         collection_name=config.text_collection_name,
         uri=URI,
         token=TOKEN,
-        dim=1536,
+        dim=ADA002_EMBED_DIM,
     )
 
     image_storage_context = MilvusVectorStore(
         collection_name=config.image_collection_name,
         uri=URI,
         token=TOKEN,
-        dim=512,
+        dim=image_embed_dim,
     )
 
     storage_context = StorageContext.from_defaults(
@@ -788,7 +781,6 @@ def _query_index(ctx):
 
     model_name = ctx.params.get("model_name", "gpt-4-vision-preview")
     model = _get_multimodal_llm(model_name)
-    from llama_index.core.multi_modal_llms.base import MultiModalLLM
 
     text_top_k = ctx.params.get("text_top_k", 2)
     image_top_k = ctx.params.get("image_top_k", 2)
