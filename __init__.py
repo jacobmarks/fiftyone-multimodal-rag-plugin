@@ -13,7 +13,8 @@ import textwrap
 import json
 from pdf2image import convert_from_path
 from PIL import Image, ImageDraw, ImageFont
-import qdrant_client
+
+# import qdrant_client
 
 from llama_index.core import SimpleDirectoryReader
 from llama_index.core.schema import (
@@ -35,7 +36,6 @@ from llama_index.multi_modal_llms.replicate import ReplicateMultiModal
 from llama_index.multi_modal_llms.replicate.base import (
     REPLICATE_MULTI_MODAL_LLM_MODELS,
 )
-from llama_index.vector_stores.qdrant import QdrantVectorStore
 from llama_index.vector_stores.milvus import MilvusVectorStore
 
 import fiftyone as fo
@@ -58,6 +58,8 @@ ALL_MODEL_NAMES.extend(OPENAI_MODEL_NAMES)
 ALL_MODEL_NAMES.extend(REPLICATE_MODEL_NAMES)
 ALL_MODEL_NAMES = sorted(ALL_MODEL_NAMES)
 
+URI = os.environ.get("ZILLIZ_URI", "")
+TOKEN = os.environ.get("ZILLIZ_TOKEN", "")
 
 # define our QA prompt template
 qa_tmpl_str = (
@@ -453,7 +455,7 @@ def _indexing_options_input(ctx, inputs):
 def _create_index(ctx):
     index_hash = _create_hash()
 
-    client = qdrant_client.QdrantClient(location=":memory:")
+    # client = qdrant_client.QdrantClient(location=":memory:")
     index_name = ctx.params.get("index_name", None)
     dataset = ctx.dataset
 
@@ -478,14 +480,13 @@ def _create_index(ctx):
 
     ### Create storage context
     text_collection_name = f"text_collection_{index_hash}"
-    text_store = QdrantVectorStore(
-        client=client, collection_name=text_collection_name
+    text_store = MilvusVectorStore(
+        collection_name=text_collection_name, uri=URI, token=TOKEN, dim=1536
     )
     image_collection_name = f"image_collection_{index_hash}"
-    image_store = QdrantVectorStore(
-        client=client, collection_name=image_collection_name
+    image_store = MilvusVectorStore(
+        collection_name=image_collection_name, uri=URI, token=TOKEN, dim=512
     )
-
     storage_context = StorageContext.from_defaults(
         vector_store=text_store, image_store=image_store
     )
@@ -509,12 +510,14 @@ def _create_index(ctx):
 
     ### serialize and save
     config.nodes = [node for node in nodes]
-    config.storage_context_for_text = index.storage_context.vector_stores[
-        "default"
-    ].to_dict()
-    config.storage_context_for_images = index.storage_context.vector_stores[
-        "image"
-    ].to_dict()
+    config.text_collection_name = text_collection_name
+    config.image_collection_name = image_collection_name
+    # config.storage_context_for_text = index.storage_context.vector_stores[
+    #     "default"
+    # ].to_dict()
+    # config.storage_context_for_images = index.storage_context.vector_stores[
+    #     "image"
+    # ].to_dict()
     # config.service_context = index.service_context.to_dict()
     config.is_image_to_text = is_image_to_text
     config.captions_field = captions_field
@@ -576,7 +579,6 @@ def _get_index_name(ctx, run_key):
 def _list_indexes(ctx):
     dataset = ctx.dataset
     run_keys = dataset.list_runs()
-    # return run_keys
     return [
         _get_index_name(ctx, run_key)
         for run_key in run_keys
@@ -749,15 +751,18 @@ def _load_index(dataset, run_key):
 
     is_image_to_text = config.is_image_to_text
 
-    client = qdrant_client.QdrantClient(location=":memory:")
-    text_storage_context = QdrantVectorStore(
-        client=client,
-        collection_name=config.storage_context_for_text["collection_name"],
+    text_storage_context = MilvusVectorStore(
+        collection_name=config.text_collection_name,
+        uri=URI,
+        token=TOKEN,
+        dim=1536,
     )
 
-    image_storage_context = QdrantVectorStore(
-        client=client,
-        collection_name=config.storage_context_for_images["collection_name"],
+    image_storage_context = MilvusVectorStore(
+        collection_name=config.image_collection_name,
+        uri=URI,
+        token=TOKEN,
+        dim=512,
     )
 
     storage_context = StorageContext.from_defaults(
@@ -784,11 +789,6 @@ def _query_index(ctx):
     model_name = ctx.params.get("model_name", "gpt-4-vision-preview")
     model = _get_multimodal_llm(model_name)
     from llama_index.core.multi_modal_llms.base import MultiModalLLM
-
-    with open("/tmp/out.txt", "a") as f:
-        f.write(
-            str(type(model)) + str(isinstance(model, MultiModalLLM)) + "AAAAAA"
-        )
 
     text_top_k = ctx.params.get("text_top_k", 2)
     image_top_k = ctx.params.get("image_top_k", 2)
