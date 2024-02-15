@@ -505,12 +505,15 @@ def _create_index(ctx):
     config.name = index_name
 
     ### serialize and save
-    config.nodes = [node for node in nodes]
     config.text_collection_name = text_collection_name
     config.image_collection_name = image_collection_name
     config.is_image_to_text = is_image_to_text
     config.captions_field = captions_field
     dataset.register_run(run_key, config)
+
+    results = dataset.init_run_results(run_key)
+    results.nodes = [node for node in nodes]
+    dataset.save_run_results(run_key, results)
 
 
 class CreateMultiModalRAGIndex(foo.Operator):
@@ -731,8 +734,9 @@ def _load_index(dataset, run_key):
     if cache_key in cache:
         return cache[cache_key]
 
+    all_nodes = dataset.load_run_results(run_key).nodes
     nodes = []
-    for node in config.nodes:
+    for node in all_nodes:
         if "image" in node["metadata"]["file_type"]:
             nodes.append(ImageNode.from_dict(node))
         else:
