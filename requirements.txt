@@ -1,4 +1,4 @@
-git+https://github.com/openai/CLIP.git
+clip @ git+https://github.com/openai/CLIP.git
 milvus>=2.3.0
 pdf2image
 pillow
